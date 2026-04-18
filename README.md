@@ -12,10 +12,11 @@ Linear programming-based optimizer for procurement planning, ensuring whole prod
 
 ```
 src/
-  dataset.py    # Mock data interface
+  dataset.py    # DB-backed data interface (db_new.sqlite)
   main.py       # Entry point for optimization
   optimizer.py  # LP model implementation
 requirements.txt
+db_new.sqlite
 ```
 
 ## Setup
@@ -35,6 +36,8 @@ requirements.txt
    ```bash
    python src/main.py
    ```
+
+The optimizer reads company-specific supply chain data from `db_new.sqlite` in the repository root. By default, it runs for company id `1`.
 
 If port `8501` is busy, choose another port:
 
@@ -71,7 +74,7 @@ pip install -r requirements.txt
 
 ### `No such table` / DB errors
 
-Make sure `db.sqlite` exists in the root folder and has the expected schema.
+Make sure `db_new.sqlite` exists in the root folder and has the expected schema.
 
 ### Wrong command typo
 
@@ -104,6 +107,7 @@ The optimizer takes structured supply chain data:
 - Supplier capacity per material
 - Threshold cost per product (max possible price we want to pay to make it)
 - Cost per distance per unit
+- Data is loaded from `db_new.sqlite` for a single company
 
 ---
 
