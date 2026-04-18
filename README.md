@@ -85,6 +85,26 @@ py -m venv .venv
 pip install -r requirements.txt
 ```
 
+## 5.1) Configure Dify credentials
+
+Create a local `.env` file in the project root (same level as `requirements.txt`).
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` and set:
+
+```dotenv
+DIFY_API_KEY=your_dify_api_key_here
+DIFY_BASE_URL=https://api.dify.ai/v1
+DIFY_USER_PREFIX=company
+```
+
+Notes:
+- `.env` is git-ignored and should never be committed.
+- `.env.example` is safe to commit and should be shared with teammates.
+
 Optional check:
 
 ```bash

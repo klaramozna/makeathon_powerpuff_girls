@@ -58,3 +58,69 @@ def get_raw_materials(company_id: int) -> list[dict]:
     with closing(_connect()) as connection:
         rows = connection.execute(query, (company_id,)).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_suppliers() -> list[dict]:
+    query = """
+        SELECT
+            s.Id,
+            s.Name,
+            COUNT(sp.ProductId) AS offered_products
+        FROM Supplier s
+        LEFT JOIN Supplier_Product sp ON sp.SupplierId = s.Id
+        GROUP BY s.Id, s.Name
+        ORDER BY s.Name;
+    """
+    with closing(_connect()) as connection:
+        rows = connection.execute(query).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_raw_material_catalog() -> list[dict]:
+    query = """
+        SELECT
+            p.Id,
+            p.SKU,
+            c.Name AS company_name
+        FROM Product p
+        JOIN Company c ON c.Id = p.CompanyId
+        WHERE p.Type = 'raw-material'
+        ORDER BY c.Name, p.SKU;
+    """
+    with closing(_connect()) as connection:
+        rows = connection.execute(query).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_materials_for_supplier(supplier_id: int) -> list[dict]:
+    query = """
+        SELECT
+            p.Id AS material_id,
+            p.SKU,
+            c.Name AS company_name,
+            p.Type
+        FROM Supplier_Product sp
+        JOIN Product p ON p.Id = sp.ProductId
+        JOIN Company c ON c.Id = p.CompanyId
+        WHERE sp.SupplierId = ?
+          AND p.Type = 'raw-material'
+        ORDER BY c.Name, p.SKU;
+    """
+    with closing(_connect()) as connection:
+        rows = connection.execute(query, (supplier_id,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_suppliers_for_material(material_id: int) -> list[dict]:
+    query = """
+        SELECT
+            s.Id AS supplier_id,
+            s.Name AS supplier_name
+        FROM Supplier_Product sp
+        JOIN Supplier s ON s.Id = sp.SupplierId
+        WHERE sp.ProductId = ?
+        ORDER BY s.Name;
+    """
+    with closing(_connect()) as connection:
+        rows = connection.execute(query, (material_id,)).fetchall()
+    return [dict(row) for row in rows]
