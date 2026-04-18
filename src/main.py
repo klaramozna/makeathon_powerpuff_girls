@@ -13,9 +13,9 @@ def run_optimization():
     """
 
     # -----------------------------
-    # 1. Load dataset
+    # 1. Load dataset for a single company
     # -----------------------------
-    dataset = DatasetInterface(seed=42)
+    dataset = DatasetInterface(company_id=1)
 
     # -----------------------------
     # 2. Initialize optimizer
@@ -23,6 +23,8 @@ def run_optimization():
     optimizer = Optimizer(
         dataset=dataset
     )
+
+    print(f"Running optimization for company: {dataset.get_company_name()}")
 
     # -----------------------------
     # 3. Build optimization model
