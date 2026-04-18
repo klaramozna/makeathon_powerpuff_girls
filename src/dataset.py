@@ -1,102 +1,138 @@
-import random
+import sqlite3
+from pathlib import Path
 
 
 class DatasetInterface:
     """
-    Mock dataset for procurement optimization (LP version).
+    Database-backed dataset for procurement optimization.
 
-    Provides:
-    - product demand
-    - BOM structure
-    - unit cost per (supplier, material)
-    - supplier distances (for transport cost)
-    - supplier capacities
+    Loads company-specific finished goods, raw materials,
+    BOM amounts, supplier distances, supplier material costs,
+    and capacities from `db_new.sqlite`.
     """
 
-    def __init__(self, seed=42):
-        random.seed(seed)
+    def __init__(self, company_id=1, db_path=None):
+        self.company_id = company_id
+        self.db_path = Path(db_path) if db_path else Path(__file__).resolve().parents[1] / "db_new.sqlite"
 
-        # ------------------------
-        # CORE ENTITIES
-        # ------------------------
-        self._products = ["cola", "juice", "water"]
-        self._materials = ["sugar", "water", "flavoring", "bottle", "label"]
-        self._suppliers = ["s1", "s2", "s3", "s4"]
+        self.company_name = None
+        self._products = []
+        self._materials = []
+        self._suppliers = []
+        self._demand = {}
+        self._threshold = {}
+        self._bom = {}
+        self._unit_cost = {}
+        self._capacity = {}
+        self._distance = {}
+        self._supplier_material_pairs = []
 
-        # ------------------------
-        # DEMAND
-        # ------------------------
-        self._demand = {
-            "cola": 1000,
-            "juice": 800,
-            "water": 1200
-        }
+        self._load_data()
 
-        # ------------------------
-        # THRESHOLD COST PER PRODUCT
-        # ------------------------
-        self._threshold = {
-            "cola": 20.0,
-            "juice": 15.0,
-            "water": 10.0
-        }
+    def _connect(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        return connection
 
-        # ------------------------
-        # BILL OF MATERIALS
-        # ------------------------
-        self._bom = {
-            "cola": {
-                "sugar": 0.5,
-                "water": 0.2,
-                "flavoring": 1.5,
-                "bottle": 0.1,
-                "label": 0.1
-            },
-            "juice": {
-                "sugar": 0.9,
-                "water": 0.1,
-                "flavoring": 0.5,
-                "bottle": 0.9,
-                "label": 0.1
-            },
-            "water": {
-                "water": 0.1,
-                "bottle": 0.2,
-                "label": 0.5
-            }
-        }
+    def _load_data(self):
+        with self._connect() as connection:
+            cursor = connection.cursor()
 
-        # ------------------------
-        # UNIT COST per (supplier, material)
-        # ------------------------
-        self._unit_cost = {
-            (s, m): round(random.uniform(0.5, 6.0), 2)
-            for s in self._suppliers
-            for m in self._materials
-        }
+            company_row = cursor.execute(
+                "SELECT Name FROM Company WHERE Id = ?",
+                (self.company_id,)
+            ).fetchone()
+            if company_row is None:
+                raise ValueError(f"Company id {self.company_id} not found in {self.db_path}")
+            self.company_name = company_row["Name"]
 
-        # ------------------------
-        # DISTANCE per supplier (km)
-        # ------------------------
-        self._distance = {
-            "s1": random.randint(150, 1000),
-            "s2": random.randint(150, 1000),
-            "s3": random.randint(150, 1000),
-            "s4": random.randint(150, 1000)
-        }
+            finished_rows = cursor.execute(
+                "SELECT Id, SKU, Demand, Threshold "
+                "FROM Product "
+                "WHERE CompanyId = ? AND Type = 'finished-good' "
+                "ORDER BY Id",
+                (self.company_id,)
+            ).fetchall()
+            if not finished_rows:
+                raise ValueError(f"No finished goods found for company id {self.company_id}")
 
-        # ------------------------
-        # CAPACITY per (supplier, material)
-        # ------------------------
-        self._capacity = {
-            (s, m): random.randint(50, 150)
-            for s in self._suppliers
-            for m in self._materials
-        }
+            for row in finished_rows:
+                sku = row["SKU"]
+                self._products.append(sku)
+                self._demand[sku] = row["Demand"] or 0
+                self._threshold[sku] = row["Threshold"] or 0
 
-    # =========================================================
-    # BASIC ACCESS METHODS
-    # =========================================================
+            material_rows = cursor.execute(
+                "SELECT DISTINCT rm.Id, rm.SKU "
+                "FROM BOM_Component bc "
+                "JOIN BOM b ON bc.BOMId = b.Id "
+                "JOIN Product fg ON fg.Id = b.ProducedProductId "
+                "JOIN Product rm ON rm.Id = bc.ConsumedProductId "
+                "WHERE fg.CompanyId = ? AND fg.Type = 'finished-good' "
+                "AND rm.Type = 'raw-material' "
+                "ORDER BY rm.Id",
+                (self.company_id,)
+            ).fetchall()
+            if not material_rows:
+                raise ValueError(f"No raw materials found for company id {self.company_id}")
+
+            for row in material_rows:
+                self._materials.append(row["SKU"])
+
+            self._bom = {sku: {} for sku in self._products}
+            bom_rows = cursor.execute(
+                "SELECT fg.SKU AS product_sku, rm.SKU AS material_sku, bc.Amount "
+                "FROM BOM_Component bc "
+                "JOIN BOM b ON b.Id = bc.BOMId "
+                "JOIN Product fg ON fg.Id = b.ProducedProductId "
+                "JOIN Product rm ON rm.Id = bc.ConsumedProductId "
+                "WHERE fg.CompanyId = ? AND fg.Type = 'finished-good' "
+                "AND rm.Type = 'raw-material'",
+                (self.company_id,)
+            ).fetchall()
+            for row in bom_rows:
+                self._bom[row["product_sku"]][row["material_sku"]] = row["Amount"] or 0.0
+
+            if self._materials:
+                placeholders = ",".join("?" for _ in self._materials)
+                supplier_rows = cursor.execute(
+                    f"SELECT DISTINCT s.Id, s.Name, s.DistanceKm "
+                    f"FROM Supplier s "
+                    f"JOIN Supplier_Product sp ON sp.SupplierId = s.Id "
+                    f"JOIN Product rm ON rm.Id = sp.ProductId "
+                    f"WHERE rm.Type = 'raw-material' AND rm.SKU IN ({placeholders}) "
+                    f"ORDER BY s.Id",
+                    tuple(self._materials)
+                ).fetchall()
+
+                for row in supplier_rows:
+                    self._suppliers.append(row["Name"])
+                    self._distance[row["Name"]] = row["DistanceKm"] or 0.0
+
+                pair_rows = cursor.execute(
+                    f"SELECT s.Name AS supplier, rm.SKU AS material, sp.UnitCost, sp.Capacity "
+                    f"FROM Supplier_Product sp "
+                    f"JOIN Supplier s ON s.Id = sp.SupplierId "
+                    f"JOIN Product rm ON rm.Id = sp.ProductId "
+                    f"WHERE rm.Type = 'raw-material' AND rm.SKU IN ({placeholders}) "
+                    f"ORDER BY s.Id, rm.Id",
+                    tuple(self._materials)
+                ).fetchall()
+
+                for row in pair_rows:
+                    supplier_name = row["supplier"]
+                    material_name = row["material"]
+                    self._supplier_material_pairs.append((supplier_name, material_name))
+                    self._unit_cost[(supplier_name, material_name)] = row["UnitCost"] or 0.0
+                    self._capacity[(supplier_name, material_name)] = row["Capacity"] or 0
+
+            if not self._suppliers or not self._supplier_material_pairs:
+                raise ValueError(
+                    f"No supplier-material relationships found for company id {self.company_id}"
+                )
+
+    def get_company_name(self):
+        return self.company_name
 
     def get_products(self):
         return self._products
@@ -107,6 +143,9 @@ class DatasetInterface:
     def get_suppliers(self):
         return self._suppliers
 
+    def get_supplier_material_pairs(self):
+        return self._supplier_material_pairs
+
     def get_demand(self, product):
         return self._demand[product]
 
@@ -116,30 +155,11 @@ class DatasetInterface:
     def get_ingredients_per_product(self, product):
         return self._bom[product]
 
-    # =========================================================
-    # COST MODEL (UPDATED)
-    # =========================================================
-
     def get_unit_cost(self, supplier, material):
-        """
-        Cost per unit of material from a supplier.
-        """
         return self._unit_cost[(supplier, material)]
 
     def get_supplier_distance(self, supplier):
-        """
-        Distance from supplier to company (km).
-        Used for transport cost:
-            transport_cost = distance × cost_per_km × quantity
-        """
         return self._distance[supplier]
 
-    # =========================================================
-    # CAPACITY
-    # =========================================================
-
     def get_supplier_capacity(self, supplier, material):
-        """
-        Max supply of a material from a supplier.
-        """
         return self._capacity[(supplier, material)]

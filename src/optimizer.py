@@ -16,7 +16,7 @@ class Optimizer:
     - supplier capacity limits (hard constraint)
     """
 
-    def __init__(self, dataset, transport_cost_per_km=0.001):
+    def __init__(self, dataset, transport_cost_per_km=0.05):
         self.dataset = dataset
         self.transport_cost_per_km = transport_cost_per_km
 
@@ -25,11 +25,18 @@ class Optimizer:
         self.y = {}
         self.z = {}
 
+    def _var_name(self, prefix, key):
+        safe_key = "".join(
+            c if c.isalnum() or c == '_' else '_' for c in str(key)
+        )
+        return f"{prefix}_{safe_key}"
+
     def build_model(self):
 
         products = self.dataset.get_products()
         materials = self.dataset.get_materials()
         suppliers = self.dataset.get_suppliers()
+        supplier_material_pairs = self.dataset.get_supplier_material_pairs()
 
         self.model = LpProblem("Procurement_Optimization", LpMinimize)
 
@@ -39,35 +46,35 @@ class Optimizer:
         for p in products:
             demand_p = self.dataset.get_demand(p)
             self.y[p] = LpVariable(
-                f"y_{p}",
+                self._var_name("y", p),
                 lowBound=0,
                 upBound=demand_p,
                 cat=LpInteger
             )
             self.z[p] = LpVariable(
-                f"z_{p}",
+                self._var_name("z", p),
                 lowBound=0,
                 cat=LpInteger
             )
 
-        for s in suppliers:
-            for m in materials:
-                self.x[(s, m)] = LpVariable(
-                    f"x_{s}_{m}",
-                    lowBound=0
-                )
+        for supplier, material in supplier_material_pairs:
+            self.x[(supplier, material)] = LpVariable(
+                self._var_name("x", f"{supplier}_{material}"),
+                lowBound=0
+            )
 
         # -----------------------------
         # COST FUNCTION
         # -----------------------------
         procurement_cost = lpSum(
-            self.dataset.get_unit_cost(s, m) * self.x[(s, m)]
-            for s in suppliers for m in materials
+            self.dataset.get_unit_cost(supplier, material) * self.x[(supplier, material)]
+            for supplier, material in supplier_material_pairs
         )
 
         transport_cost = lpSum(
-            self.transport_cost_per_km * self.dataset.get_supplier_distance(s) * lpSum(self.x[(s, m)] for m in materials)
-            for s in suppliers
+            self.transport_cost_per_km * self.dataset.get_supplier_distance(supplier)
+            * lpSum(self.x[(supplier, material)] for supplier2, material in supplier_material_pairs if supplier2 == supplier)
+            for supplier in suppliers
         )
 
         shortage_cost = lpSum(
@@ -86,7 +93,7 @@ class Optimizer:
             demand_p = self.dataset.get_demand(p)
             self.model += (
                 self.y[p] + self.z[p] == demand_p,
-                f"demand_{p}"
+                f"demand_{self._var_name(p, p)}"
             )
 
         # (2) Material procurement constraints (based on producible products)
@@ -96,19 +103,17 @@ class Optimizer:
                 for p in products
             )
             self.model += (
-                lpSum(self.x[(s, m)] for s in suppliers) >= required,
-                f"material_{m}"
+                lpSum(self.x[(supplier, m)] for supplier, material in supplier_material_pairs if material == m) >= required,
+                f"material_{self._var_name('mat', m)}"
             )
 
         # (3) Capacity constraints (HARD)
-        for s in suppliers:
-            for m in materials:
-                capacity = self.dataset.get_supplier_capacity(s, m)
-
-                self.model += (
-                    self.x[(s, m)] <= capacity,
-                    f"capacity_{s}_{m}"
-                )
+        for supplier, material in supplier_material_pairs:
+            capacity = self.dataset.get_supplier_capacity(supplier, material)
+            self.model += (
+                self.x[(supplier, material)] <= capacity,
+                f"capacity_{self._var_name(supplier, material)}"
+            )
 
         return self.model
 
