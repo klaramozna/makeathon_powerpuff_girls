@@ -1,123 +1,40 @@
-# makeathon_powerpuff_girls
+# Procurement Optimization
 
-Simple Python app to visualize company-specific data from `db.sqlite`.
+Linear programming-based optimizer for procurement planning, ensuring whole products are built rather than partial materials.
 
-## Stack
+## Features
 
-- Python
-- Streamlit (UI)
-- SQLite (data source)
+- Optimizes material procurement from suppliers with cost and transport considerations.
+- Handles product-level shortages to avoid partial product builds.
+- Uses integer constraints for exact product quantities.
 
-## App features
+## Project Structure
 
-- Start page with company selection dropdown
-- Two tabs per company:
-  - `Products`
-  - `Raw Materials`
-- Lightweight, modern table-based UI
-
-## Project structure
-
-```text
-app/
-  __init__.py
-  config.py
-  db.py
-  main.py
+```
+src/
+  dataset.py    # Mock data interface
+  main.py       # Entry point for optimization
+  optimizer.py  # LP model implementation
 requirements.txt
-db.sqlite
 ```
 
-## 1) Clone and open project
+## Setup
 
-```bash
-git clone <your-repo-url>
-cd makeathon_powerpuff_girls
-```
+1. Create virtual environment:
+   ```bash
+   python -m venv .venv
+   # Activate: source .venv/bin/activate (Linux/macOS) or .venv\Scripts\Activate.ps1 (Windows)
+   ```
 
-## 2) Add `.gitignore` entries (important)
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-If `.gitignore` does not exist, create it at the project root and add at least:
-
-```gitignore
-db.sqlite
-.venv/
-__pycache__/
-.pytest_cache/
-*.pyc
-```
-
-Why:
-- `db.sqlite` can contain local/private data and usually should not be committed.
-- `.venv` and cache files are machine-specific build artifacts.
-
-## 3) Prepare the database file
-
-The app expects the database here:
-
-```text
-./db.sqlite
-```
-
-If your DB is somewhere else, copy it into the project root with the exact name `db.sqlite`.
-
-## 4) Create and activate Python environment
-
-Recommended Python version: 3.11+ (3.13 also works).
-
-### Linux / macOS
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### Windows (PowerShell)
-
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-## 5) Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-## 5.1) Configure Dify credentials
-
-Create a local `.env` file in the project root (same level as `requirements.txt`).
-
-```bash
-cp .env.example .env
-```
-
-Then edit `.env` and set:
-
-```dotenv
-DIFY_API_KEY=your_dify_api_key_here
-DIFY_BASE_URL=https://api.dify.ai/v1
-DIFY_USER_PREFIX=company
-```
-
-Notes:
-- `.env` is git-ignored and should never be committed.
-- `.env.example` is safe to commit and should be shared with teammates.
-
-Optional check:
-
-```bash
-python -m pip list
-```
-
-## 6) Run the app
-
-Default (recommended for local dev):
-
-```bash
-streamlit run app/main.py
-```
+3. Run optimization:
+   ```bash
+   python src/main.py
+   ```
 
 If port `8501` is busy, choose another port:
 
@@ -133,6 +50,12 @@ In the terminal where Streamlit is running, press:
 
 ```text
 Ctrl + C
+```
+
+## 8) Run the optimizer
+```bash
+cd src
+python optimizer.py
 ```
 
 ## Common issues
@@ -166,4 +89,151 @@ If you want fully reproducible installs:
 
 ```bash
 pip freeze > requirements.lock.txt
+```
+
+## 🧠 Optimizer
+
+### Input
+The optimizer takes structured supply chain data:
+- Products and their demand (units to be produced)
+- Bill of Materials (BOM): material requirements per product
+- Materials (raw ingredients / packaging items)
+- Suppliers
+- Unit cost per supplier per material
+- Distance of company to supplier
+- Supplier capacity per material
+- Threshold cost per product (max possible price we want to pay to make it)
+- Cost per distance per unit
+
+---
+
+### Output
+The model returns:
+- Optimal procurement plan: quantity of each material to buy from each supplier
+- Production plan: number of each product to produce
+- Product shortages (if demand cannot be fully met due to cost thresholds or constraints)
+- Total optimized cost (including threshold penalties for shortages)
+
+---
+
+### Optimization Model
+The problem is formulated as a **Mixed Integer Linear Programming (MILP)** model.
+
+It minimizes total cost:
+
+- Procurement cost: sum of (supplier cost + transport cost) × quantity purchased
+- Shortage penalty: threshold cost per product for unmet demand
+
+Subject to:
+- Product demand constraints (can be partially violated via penalties)
+- Material procurement based on producible products
+- Supplier capacity constraints
+
+Shortage variables are introduced per product to ensure feasibility. Products are produced only if the marginal cost is below the threshold.
+
+---
+
+### Key Assumptions
+- Distance cost is 0.05 euros per km per unit
+- Materials are divisible (continuous quantities)
+- Products are produced in whole units (integer constraints)
+- Supplier capacities are fixed and known
+- Demand is deterministic (no uncertainty)
+- Shortages at product level if cost exceeds threshold
+- No transportation or time constraints included
+
+### 💻 Output Usage in Code
+
+The optimizer returns a dictionary called `solution` with four fields:
+
+---
+
+**1. status (str)**  
+Indicates the result of the optimization run.
+
+Possible values:
+- `"Optimal"` → A valid best solution was found
+- `"Infeasible"` → No solution satisfies constraints
+- `"Unbounded"` → Cost can be reduced indefinitely
+- `"Not Solved"` → Solver did not run properly
+
+Meaning: tells you whether the result can be trusted.
+
+---
+
+**2. objective_value (float)**  
+The total minimized cost of the solution.
+
+Includes:
+- procurement cost (what you pay suppliers)
+- shortage penalties (cost for unmet demand)
+
+Meaning: lower value = better solution.
+
+---
+
+**3. procurement (Dict[(str, str), float])**  
+Maps `(supplier, material)` → quantity purchased.
+
+Example:
+`("s1", "sugar") → 500`
+
+Meaning:
+How much of each material to buy from each supplier.
+
+If a pair is missing, its value is 0 or negligible.
+
+---
+
+**4. shortages (Dict[str, float])**  
+Maps `product → unmet demand`.
+
+Possible values:
+- empty `{}` → all demand fully satisfied
+- positive float → number of missing products
+
+Meaning:
+Shows products not produced due to cost exceeding threshold or constraints.
+
+---
+
+**5. production (Dict[str, float])**  
+Maps `product → quantity produced`.
+
+Meaning:
+Number of each product to manufacture.
+
+Usage in code:
+
+```python
+solution = {
+    "status": str,
+    "objective_value": float,
+    "procurement": Dict[Tuple[str, str], float],
+    "shortages": Dict[str, float],
+    "production": Dict[str, float]
+}
+
+solution = optimizer.solve()
+
+# Solver status
+print(solution["status"])
+
+# Total optimized cost
+print(solution["objective_value"])
+
+# Procurement plan: (supplier, material) -> quantity
+for (supplier, material), qty in solution["procurement"].items():
+    print(supplier, material, qty)
+
+# Production plan: product -> quantity
+for product, qty in solution["production"].items():
+    print(product, qty)
+
+# Product shortages
+for product, missing_qty in solution["shortages"].items():
+    print(product, missing_qty)
+
+# Optional: disable console output in pipeline usage
+run_optimization(verbose=False)
 ```
