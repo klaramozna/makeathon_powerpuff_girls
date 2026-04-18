@@ -17,6 +17,8 @@ from app.db import (
     get_suppliers,
     get_suppliers_for_material,
 )
+from src.dataset import DatasetInterface
+from src.optimizer import Optimizer
 
 
 st.set_page_config(page_title="Company Visualizer", page_icon="📊", layout="wide")
@@ -62,7 +64,7 @@ st.caption(
     "Use Company View for company-level data, or Supplier Explorer for supplier/material relationships."
 )
 
-tab_company_view, tab_supplier_explorer = st.tabs(["Company View", "Supplier Explorer"])
+tab_company_view, tab_supplier_explorer, tab_optimization = st.tabs(["Company View", "Supplier Explorer", "Optimization"])
 
 with tab_company_view:
     companies = load_companies()
@@ -181,3 +183,72 @@ with tab_supplier_explorer:
                 st.dataframe(material_suppliers_df, hide_index=True, width="stretch")
             else:
                 st.info("No suppliers found for this material.")
+
+with tab_optimization:
+    st.subheader("Procurement Optimization")
+
+    companies = load_companies()
+    if not companies:
+        st.warning("No companies found in the database.")
+        st.stop()
+
+    selected_company = st.selectbox(
+        "Choose company for optimization",
+        companies,
+        format_func=lambda company: company["Name"],
+        key="optimization_company_select",
+    )
+
+    company_id = selected_company["Id"]
+    company_name = selected_company["Name"]
+
+    if st.button("Run Optimization", key="run_optimization"):
+        with st.spinner("Running optimization..."):
+            dataset = DatasetInterface(company_id=company_id)
+            optimizer = Optimizer(dataset=dataset)
+            optimizer.build_model()
+            solution = optimizer.solve()
+
+        st.success("Optimization completed!")
+
+        # Display results
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Status", solution["status"])
+        col2.metric("Total Cost (€)", f"{solution['objective_value']:.2f}")
+        col3.metric("Shortages", len([s for s in solution["shortages"].values() if s > 0]))
+
+        st.subheader("Procurement Plan")
+        if solution["procurement"]:
+            procurement_df = pd.DataFrame(
+                [
+                    {"Supplier": supplier, "Material": material, "Quantity": qty}
+                    for (supplier, material), qty in solution["procurement"].items()
+                ]
+            )
+            st.dataframe(procurement_df, hide_index=True, width="stretch")
+        else:
+            st.info("No procurement needed.")
+
+        st.subheader("Production Plan")
+        if solution["production"]:
+            production_df = pd.DataFrame(
+                [
+                    {"Product": product, "Quantity": qty}
+                    for product, qty in solution["production"].items()
+                ]
+            )
+            st.dataframe(production_df, hide_index=True, width="stretch")
+        else:
+            st.info("No production planned.")
+
+        st.subheader("Shortages")
+        if solution["shortages"]:
+            shortages_df = pd.DataFrame(
+                [
+                    {"Product": product, "Shortage (units)": qty}
+                    for product, qty in solution["shortages"].items() if qty > 0
+                ]
+            )
+            st.dataframe(shortages_df, hide_index=True, width="stretch")
+        else:
+            st.info("No shortages! 🎉")
