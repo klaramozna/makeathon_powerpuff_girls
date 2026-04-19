@@ -1,3 +1,26 @@
+## Key Focus Areas / What We Drove Forward
+
+- **Optimization**: who are the best suppliers, how do we decide that, what params influence this (more a maths question than an AI)
+- **Data Normalization Layer**: semantic matching with AI (not fully implemented)
+- **Compliance AI Integration**: using food database to check for substitutes with AI Agents on Dify
+- **Dify Integration** 
+- **UI**
+
+## What Didn’t Fully Land
+
+- **Robust Workflow Architecture in Dify** We validated potential, but did not yet establish a production-grade, resilient workflow framework with clean node logic and reliable execution paths.  
+
+## Forward-Looking Opportunities 
+
+- **Geo-Targeted Marketing Intelligence Engine:** Build a keyword + hashtag scraping pipeline enriched with location signals to surface regional demand trends, audience sentiment, and campaign opportunities.  
+
+- **Multi-Node Intelligence Layer:** Develop a tool that monitors multiple input nodes simultaneously, detects knowledge gaps, auto-closes missing context, prioritizes critical changes, and pushes actionable recommendations in real time.  
+
+- **Adaptive Decision Dashboard:** Convert these signals into a lightweight operator cockpit for faster strategic decisions and continuous optimization.
+
+
+
+
 # Procurement Optimization
 
 Linear programming-based optimizer for procurement planning, ensuring whole products are built rather than partial materials.
